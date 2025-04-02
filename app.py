@@ -30,82 +30,94 @@ except Exception as e:
 # A real app would need proper session management or a database.
 board = chess.Board()
 
-# --- Placeholder LLM Interaction ---
+# --- LLM Interaction Using Chat Sessions ---
 def get_llm_move(current_fen, model_id='gemini-2.0-flash-001'):
     """
-    Placeholder function to get a move from the LLM.
-    Replace this with your actual LLM SDK/API call.
+    Get a move from the LLM using a chat session to handle potential illegal moves.
     """
     print(f"--- Attempting to get LLM move for FEN: {current_fen} using model: {model_id} ---")
 
-    # *** TODO: Replace this placeholder logic ***
-    # 1. Format the prompt for your LLM
-    #    - Include rules, current FEN, move history (board.move_stack), desired output format (UCI like 'e7e5').
-    #    - Example prompt structure:
+    if not client:
+        print("LLM Client is not available. Cannot generate move.")
+        return get_random_move()
+    
+    # Get legal moves in UCI format
     legal_moves_uci = [move.uci() for move in board.legal_moves]
     legal_moves_str = " ".join(legal_moves_uci)
-
-    prompt = (
+    
+    # Create initial prompt
+    initial_prompt = (
         "You are a chess engine playing as Black.\n"
         "The current board state in FEN notation is:\n"
         f"{current_fen}\n"
         "History of moves in UCI format: " + " ".join([m.uci() for m in board.move_stack]) + "\n"
-        f"LEGAL MOVES available: {legal_moves_str}\n" # Added legal moves
+        f"LEGAL MOVES available: {legal_moves_str}\n"
         "Your task is to select the best legal move for Black from the list provided.\n"
         "Respond *only* with the chosen move in UCI notation (e.g., 'g8f6', 'e7e5'). Do not add any other text."
     )
-    print(f"LLM Prompt (example):\n{prompt}")
-
-    # Use the globally initialized client
-    if not client:
-        print("LLM Client is not available. Cannot generate move.")
-        llm_response_text = None # Indicate failure
-    else:
-        try:
-            response = client.models.generate_content(
-                model=model_id, contents=prompt
+    
+    try:
+        # Create a chat session
+        chat = client.chats.create(model=model_id)
+        
+        # Send the initial prompt
+        response = chat.send_message(initial_prompt)
+        chosen_move_uci = response.text.strip()
+        print(f"LLM suggested move: {chosen_move_uci}")
+        
+        # Check if the move is legal
+        max_retries = 3
+        retries = 0
+        
+        while retries < max_retries:
+            # Try to parse the move
+            try:
+                move = board.parse_uci(chosen_move_uci)
+                if move in board.legal_moves:
+                    print(f"LLM provided legal move: {chosen_move_uci}")
+                    return chosen_move_uci
+                else:
+                    # Move format is valid but move is illegal
+                    print(f"LLM provided illegal move: {chosen_move_uci}")
+            except ValueError:
+                # Move format is invalid
+                print(f"LLM provided invalid format move: {chosen_move_uci}")
+            
+            # If we get here, the move was either illegal or invalid format
+            retries += 1
+            correction_prompt = (
+                f"Your selected move '{chosen_move_uci}' is illegal or invalid. "
+                f"Please choose a different move from these legal moves: {legal_moves_str}\n"
+                "Respond *only* with the chosen move in UCI notation."
             )
-            print(response.text)
-            llm_response_text = response.text # Ensure it starts as None if LLM call isn't active
-        except Exception as e:
-             print(f"Error during LLM API call: {e}")
-             llm_response_text = None
+            
+            response = chat.send_message(correction_prompt)
+            chosen_move_uci = response.text.strip()
+            print(f"LLM new suggested move (attempt {retries}): {chosen_move_uci}")
+        
+        # If we've exhausted retries, fall back to random move
+        print(f"LLM failed to provide a legal move after {max_retries} attempts. Using random move instead.")
+        return get_random_move()
+        
+    except Exception as e:
+        print(f"Error during LLM chat: {e}")
+        return get_random_move()
 
-    if not llm_response_text: # If LLM call fails or is commented out
-         print("LLM response failed or is placeholder. Choosing random legal move.")
-         try:
-             legal_moves = list(board.legal_moves)
-             if legal_moves:
-                 # Select a random move from the list of legal moves
-                 chosen_move = random.choice(legal_moves)
-                 llm_response_text = chosen_move.uci()
-                 print(f"Random move chosen: {llm_response_text}")
-             else:
-                 print("No legal moves available for random choice.")
-                 llm_response_text = None # No legal moves available
-         except Exception as e:
-             print(f"Error getting random move: {e}")
-             llm_response_text = None
-    # **** End of Random Move Placeholder ****
-
-    # 3. Parse the LLM response (basic cleanup)
-    if llm_response_text:
-         # Basic cleanup - remove quotes, extra text if any (improve this parsing)
-         # Takes the first line, removes surrounding quotes/spaces
-         cleaned_move_uci = llm_response_text.splitlines()[0].replace('"', '').replace("'", "").strip()
-         print(f"LLM Response (cleaned): '{cleaned_move_uci}'")
-         # Basic validation: Check if it looks like UCI (e.g., 4 or 5 chars, a-h, 1-8)
-         if len(cleaned_move_uci) >= 4 and len(cleaned_move_uci) <= 5:
-              # Further regex check could be added here if needed
-              return cleaned_move_uci
-         else:
-              print(f"LLM Response '{cleaned_move_uci}' doesn't look like valid UCI.")
-              return None
-    else:
-         print("LLM failed to provide a valid move string.")
-         return None
-    # *** End of placeholder section ***
-
+def get_random_move():
+    """Get a random legal move when LLM fails."""
+    try:
+        legal_moves = list(board.legal_moves)
+        if legal_moves:
+            chosen_move = random.choice(legal_moves)
+            random_move_uci = chosen_move.uci()
+            print(f"Random move chosen: {random_move_uci}")
+            return random_move_uci
+        else:
+            print("No legal moves available for random choice.")
+            return None
+    except Exception as e:
+        print(f"Error getting random move: {e}")
+        return None
 
 # --- Routes ---
 
