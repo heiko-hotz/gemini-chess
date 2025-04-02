@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Simple Chess UI</title>
+    <title>Chess App with AI Thoughts</title> <!-- Changed Title -->
     <!-- chessboard.js CSS (CDN) -->
     <link rel="stylesheet"
           href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
@@ -12,41 +12,38 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <h1>Chess App (Frontend Only Demo)</h1>
+    <h1>Chess App vs AI</h1> <!-- Changed Heading -->
 
     <div id="myBoard" class="board"></div>
 
     <div class="info">
         <p>Status: <span id="status">White to move.</span></p>
+        <!-- ADDED AI THOUGHTS DISPLAY AREA -->
+        <div id="aiThoughtsContainer" style="margin-top: 10px;">
+             <p style="font-weight: bold; margin-bottom: 3px;">AI Thoughts:</p>
+             <p id="aiThoughts" style="font-style: italic; color: #555; white-space: pre-wrap; border-left: 3px solid #eee; padding-left: 8px; min-height: 1.2em;"></p> <!-- Added styling and pre-wrap -->
+        </div>
+        <!-- END ADDED AREA -->
         <p>FEN: <span id="fen"></span></p>
-        <p>PGN: <span id="pgn"></span></p>
+        <p>PGN: <span id="pgn"></span></p> <!-- Kept PGN for reference -->
         <!-- Add Model Selection Dropdown -->
         <div class="model-select">
             <label for="modelSelect">AI Model:</label>
             <select id="modelSelect">
                 <option value="gemini-2.0-flash-001" selected>Gemini 2.0 Flash</option>
                 <option value="gemini-2.5-pro-exp-03-25">Gemini 2.5 Pro</option>
+                <!-- Add other models as needed -->
             </select>
         </div>
         <!-- End Model Selection Dropdown -->
         <button id="resetButton">Reset Game</button>
     </div>
 
-    <!-- Dependencies (CDNs are fine) -->
-    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
-    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.js"></script>
-
-    <!-- htmx library -->
-    <script src="https://unpkg.com/htmx.org@1.9.10"
-        integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5x+8SNHfdFI"
-        crossorigin="anonymous"></script>
-
-    <!-- Dependencies - Load LOCAL versions -->
+    <!-- Dependencies (Using LOCAL versions from the original file) -->
     <script src="{{ url_for('static', filename='libs/jquery.min.js') }}"></script>
     <script src="{{ url_for('static', filename='libs/chessboard.min.js') }}"></script>
     <script src="{{ url_for('static', filename='libs/chess.js') }}"></script>
-    <script src="{{ url_for('static', filename='libs/htmx.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='libs/htmx.min.js') }}"></script> <!-- htmx was included but not used, kept for consistency -->
 
     <!-- Your custom script - Use url_for -->
     <script src="{{ url_for('static', filename='script.js') }}"></script>

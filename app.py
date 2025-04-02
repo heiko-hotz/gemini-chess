@@ -1,4 +1,3 @@
-# app.py
 import chess
 import chess.svg
 from flask import Flask, render_template, jsonify, request, Response
@@ -7,6 +6,7 @@ import random # Needed for placeholder LLM fallback
 from google import genai
 from dotenv import load_dotenv
 import os
+import re # Import regex for better move parsing
 
 load_dotenv()
 
@@ -31,80 +31,104 @@ except Exception as e:
 board = chess.Board()
 
 # --- Placeholder LLM Interaction ---
-def get_llm_move(current_fen, model_id='gemini-2.0-flash-001'):
+def get_llm_move(current_fen, last_player_move_uci=None, model_id='gemini-2.0-flash-001'):
     """
-    Placeholder function to get a move from the LLM.
-    Replace this with your actual LLM SDK/API call.
+    Gets a move and thoughts from the LLM.
+    Returns a dictionary: {'thoughts': str, 'move': str (UCI) or None}
     """
-    print(f"--- Attempting to get LLM move for FEN: {current_fen} using model: {model_id} ---")
+    print(f"--- Attempting to get LLM move/thoughts for FEN: {current_fen} using model: {model_id} ---")
 
-    # *** TODO: Replace this placeholder logic ***
-    # 1. Format the prompt for your LLM
-    #    - Include rules, current FEN, move history (board.move_stack), desired output format (UCI like 'e7e5').
-    #    - Example prompt structure:
     legal_moves_uci = [move.uci() for move in board.legal_moves]
     legal_moves_str = " ".join(legal_moves_uci)
+    move_history_uci = " ".join([m.uci() for m in board.move_stack])
 
+    # *** MODIFIED PROMPT ***
     prompt = (
-        "You are a chess engine playing as Black.\n"
+        "You are a chess engine playing as Black, analyzing the position and deciding your next move.\n"
         "The current board state in FEN notation is:\n"
         f"{current_fen}\n"
-        "History of moves in UCI format: " + " ".join([m.uci() for m in board.move_stack]) + "\n"
-        f"LEGAL MOVES available: {legal_moves_str}\n" # Added legal moves
-        "Your task is to select the best legal move for Black from the list provided.\n"
-        "Respond *only* with the chosen move in UCI notation (e.g., 'g8f6', 'e7e5'). Do not add any other text."
+        f"History of moves in UCI format: {move_history_uci}\n"
+        f"The last move played by White (your opponent) was: {last_player_move_uci if last_player_move_uci else 'N/A (Start of game)'}\n"
+        f"LEGAL MOVES available for you (Black): {legal_moves_str}\n\n" # Added legal moves
+        "Your task:\n"
+        "1. Briefly analyze the current situation. Consider the opponent's last move, threats, opportunities, and your general strategy.\n"
+        "2. Choose the best legal move for Black from the list provided.\n"
+        "3. Respond with your analysis/thoughts first (keep it concise, 1-3 sentences).\n"
+        "4. On the VERY LAST LINE, provide *ONLY* your chosen move in UCI notation (e.g., 'g8f6', 'e7e5'). Do not include any other text or formatting on this last line."
+        "\n\nExample Response Format:\n"
+        "White's last move opened the center, but leaves their knight vulnerable. I should develop my piece and prepare to castle.\n"
+        "e7e5" # Note: actual move should be from LEGAL MOVES
     )
     print(f"LLM Prompt (example):\n{prompt}")
 
     # Use the globally initialized client
+    llm_response_text = None
     if not client:
         print("LLM Client is not available. Cannot generate move.")
-        llm_response_text = None # Indicate failure
     else:
         try:
+            # Note: Adjust generation_config if needed (e.g., temperature, max_output_tokens)
             response = client.models.generate_content(
                 model=model_id, contents=prompt
             )
-            print(response.text)
-            llm_response_text = response.text # Ensure it starts as None if LLM call isn't active
+            # Check for safety ratings or blocks if applicable for your model/API
+            # if response.prompt_feedback.block_reason:
+            #     print(f"LLM Request Blocked: {response.prompt_feedback.block_reason}")
+            # else:
+            llm_response_text = response.text
+            print(f"LLM Raw Response:\n{llm_response_text}")
         except Exception as e:
              print(f"Error during LLM API call: {e}")
-             llm_response_text = None
+             # Consider checking specific error types if the SDK provides them
 
-    if not llm_response_text: # If LLM call fails or is commented out
-         print("LLM response failed or is placeholder. Choosing random legal move.")
+    # *** MODIFIED PARSING LOGIC ***
+    llm_thoughts = "AI analysis not available."
+    llm_move_uci = None
+
+    if llm_response_text:
+        lines = llm_response_text.strip().splitlines()
+        if len(lines) >= 1:
+            # Assume the last non-empty line is the move
+            potential_move = lines[-1].strip()
+            # Basic validation: Check if it looks like UCI (4 or 5 chars, a-h, 1-8, optional promotion)
+            if re.fullmatch(r"^[a-h][1-8][a-h][1-8][qnrb]?$", potential_move):
+                 llm_move_uci = potential_move
+                 print(f"Parsed LLM Move (UCI): '{llm_move_uci}'")
+                 # If there were lines before the move, join them as thoughts
+                 if len(lines) > 1:
+                      llm_thoughts = "\n".join(lines[:-1]).strip()
+                 else:
+                      llm_thoughts = "(No thoughts provided, only move)"
+                 print(f"Parsed LLM Thoughts:\n{llm_thoughts}")
+            else:
+                print(f"LLM Response's last line '{potential_move}' doesn't look like valid UCI. Treating whole response as thoughts.")
+                llm_thoughts = llm_response_text.strip()
+                llm_move_uci = None # Explicitly set move to None
+        else:
+             print("LLM response was empty or only whitespace.")
+             llm_thoughts = "(LLM response was empty)"
+
+    # *** Fallback if LLM fails or provides invalid move ***
+    if not llm_move_uci:
+         print("LLM did not provide a valid move. Choosing random legal move.")
+         llm_thoughts += " (AI failed to provide a valid move, choosing randomly.)" # Append failure notice
          try:
              legal_moves = list(board.legal_moves)
              if legal_moves:
-                 # Select a random move from the list of legal moves
                  chosen_move = random.choice(legal_moves)
-                 llm_response_text = chosen_move.uci()
-                 print(f"Random move chosen: {llm_response_text}")
+                 llm_move_uci = chosen_move.uci()
+                 print(f"Random move chosen: {llm_move_uci}")
              else:
                  print("No legal moves available for random choice.")
-                 llm_response_text = None # No legal moves available
+                 llm_thoughts += " (No legal moves available!)"
+                 llm_move_uci = None # Ensure it's None if no moves exist
          except Exception as e:
              print(f"Error getting random move: {e}")
-             llm_response_text = None
-    # **** End of Random Move Placeholder ****
+             llm_thoughts += f" (Error during random move fallback: {e})"
+             llm_move_uci = None
 
-    # 3. Parse the LLM response (basic cleanup)
-    if llm_response_text:
-         # Basic cleanup - remove quotes, extra text if any (improve this parsing)
-         # Takes the first line, removes surrounding quotes/spaces
-         cleaned_move_uci = llm_response_text.splitlines()[0].replace('"', '').replace("'", "").strip()
-         print(f"LLM Response (cleaned): '{cleaned_move_uci}'")
-         # Basic validation: Check if it looks like UCI (e.g., 4 or 5 chars, a-h, 1-8)
-         if len(cleaned_move_uci) >= 4 and len(cleaned_move_uci) <= 5:
-              # Further regex check could be added here if needed
-              return cleaned_move_uci
-         else:
-              print(f"LLM Response '{cleaned_move_uci}' doesn't look like valid UCI.")
-              return None
-    else:
-         print("LLM failed to provide a valid move string.")
-         return None
-    # *** End of placeholder section ***
+    return {'thoughts': llm_thoughts, 'move': llm_move_uci}
+    # *** End of modified section ***
 
 
 # --- Routes ---
@@ -140,133 +164,120 @@ def handle_move():
         from_square_name = data['from']
         to_square_name = data['to']
         promotion = data.get('promotion') # Optional promotion piece (defaults to None)
-        # Get the selected model ID from the request, default if not provided
-        selected_model_id = data.get('model_id', 'gemini-2.0-flash-001')
-        print(f"Model ID selected by user (or default): {selected_model_id}") # Log selected model
+        selected_model_id = data.get('model_id', 'gemini-2.0-flash-001') # Get selected model ID
+        print(f"Model ID selected by user (or default): {selected_model_id}")
 
         move_uci = f"{from_square_name}{to_square_name}"
-        # Add promotion piece code if present and potentially valid
-        # This check prevents adding 'q' to non-promotion moves
         if promotion and len(from_square_name) == 2 and len(to_square_name) == 2:
              try:
                  from_sq = chess.parse_square(from_square_name)
                  to_sq = chess.parse_square(to_square_name)
                  piece = board.piece_at(from_sq)
-                 # Check if it's a pawn moving to the back rank
                  if piece and piece.piece_type == chess.PAWN:
                      if (piece.color == chess.WHITE and chess.square_rank(to_sq) == 7) or \
                         (piece.color == chess.BLACK and chess.square_rank(to_sq) == 0):
-                          move_uci += promotion.lower() # Ensure promotion piece is lowercase
+                          move_uci += promotion.lower()
              except ValueError:
-                # Ignore invalid square names here, parse_uci below will handle them
-                pass # Let parse_uci handle fundamental errors
+                pass
 
         print(f"Received user move attempt (UCI): {move_uci}")
 
         try:
-            # Attempt to parse the user's move using python-chess
             move = board.parse_uci(move_uci)
         except ValueError as e:
-             # Handle cases where UCI string is fundamentally invalid
              print(f"Error parsing user UCI '{move_uci}': {e}")
              return jsonify({'error': f'Invalid move format: {move_uci}', 'fen': board.fen()}), 400
 
 
         if move in board.legal_moves:
-            # Make the user's move
-            user_move_san = board.san(move) # Get SAN before pushing the move
+            user_move_san = board.san(move) # Get SAN *before* pushing the move
+            user_move_uci_for_llm = move.uci() # Get UCI *before* pushing
             board.push(move)
             print(f"User move successful: {move.uci()}.")
 
-
             # --- LLM's Turn Logic ---
             llm_move_san = None
-            game_over = board.is_game_over() # Check if user's move ended the game
+            game_over = board.is_game_over()
+            llm_thoughts_for_frontend = None # Initialize thoughts variable
 
-            # Assuming LLM plays Black (board.turn == chess.BLACK) and game isn't over
             if not game_over and board.turn == chess.BLACK:
                 print("--- Triggering LLM Turn ---")
-                # Pass the selected model ID to get_llm_move
-                llm_move_uci = get_llm_move(board.fen(), selected_model_id) # Pass current FEN and model ID
+                # Pass the user's last move UCI to the LLM function
+                llm_result = get_llm_move(board.fen(), user_move_uci_for_llm, selected_model_id) # Pass current FEN, last user move, model ID
+
+                llm_thoughts_for_frontend = llm_result.get('thoughts', "AI provided no thoughts.") # Get thoughts for frontend
+                llm_move_uci = llm_result.get('move') # Get move UCI
 
                 if llm_move_uci:
                     try:
-                        # Validate the LLM's move string before applying
                         llm_move = board.parse_uci(llm_move_uci)
                         if llm_move in board.legal_moves:
                             llm_move_san = board.san(llm_move) # Get SAN before pushing
-                            board.push(llm_move) # Make LLM move
+                            board.push(llm_move)
                             print(f"LLM move successful: {llm_move.uci()}")
-                            game_over = board.is_game_over() # Check again after LLM move
+                            game_over = board.is_game_over()
                         else:
                             print(f"!!! LLM generated illegal move: {llm_move_uci}. Board state: {board.fen()}")
                             llm_move_san = f"[LLM illegal move: {llm_move_uci}]"
+                            # Keep the thoughts from the result even if the move was illegal
                     except ValueError as e:
                         print(f"!!! Error parsing LLM move UCI '{llm_move_uci}': {e}")
                         llm_move_san = f"[LLM invalid format: {llm_move_uci}]"
+                        # Keep the thoughts
                 else:
-                    print("!!! LLM failed to provide a move.")
-                    llm_move_san = "[LLM failed]"
-            # --- End LLM's Turn Logic ---
+                    print("!!! LLM failed to provide a move (might be included in thoughts).")
+                    llm_move_san = "[LLM failed to move]"
+                    # Thoughts might contain the reason for failure if parsing failed earlier
 
-
-            # --- Determine Status Text (incorporating LLM move) ---
+            # --- Determine Status Text ---
             current_turn_color = 'Black' if board.turn == chess.BLACK else 'White'
             status_detail = ""
-            # Check game end conditions (after potentially both moves)
             if board.is_checkmate():
                  status_detail = f"CHECKMATE! {'White' if board.turn == chess.BLACK else 'Black'} wins."
-                 game_over = True # Ensure game_over is set
+                 game_over = True
             elif board.is_stalemate():
                  status_detail = "STALEMATE! Draw."
                  game_over = True
             elif board.is_insufficient_material():
                  status_detail = "DRAW! Insufficient material."
                  game_over = True
-            elif board.is_seventyfive_moves():
-                status_detail = "DRAW! 75-move rule."
-                game_over = True
-            elif board.is_fivefold_repetition():
-                status_detail = "DRAW! Fivefold repetition."
-                game_over = True
-            # elif game_over: # If game_over was set by user move but not specific draw/mate
-            #      status_detail = "Game Over." # Optional generic game over
+            # Add other draw conditions if needed (75-move, fivefold)
             elif board.is_check():
                  status_detail = f"{current_turn_color} is in CHECK!"
-            else:
+            elif not game_over:
                  status_detail = f"{current_turn_color} to move."
+            else:
+                 status_detail = "Game Over." # Generic game over if needed
 
-            # Construct final status message
-            if llm_move_san and llm_move_san.startswith("[LLM"): # If LLM failed or made invalid move
+
+            # Construct final status message (remains largely the same)
+            if llm_move_san and llm_move_san.startswith("[LLM"):
                  status_text = f"You played {user_move_san}. {llm_move_san} {status_detail}"
-            elif llm_move_san: # If LLM moved successfully
+            elif llm_move_san:
                  status_text = f"You played {user_move_san}. Computer played {llm_move_san}. {status_detail}"
-            else: # If it wasn't LLM's turn or user move ended game
+            else: # Only user moved or user move ended game
                  status_text = f"Move {user_move_san} successful. {status_detail}"
 
 
-            # --- Send back the FINAL state after both moves (if applicable) ---
+            # --- Send back the FINAL state including LLM thoughts ---
             print(f"Sending response: FEN={board.fen()}, GameOver={game_over}")
             return jsonify({
                 'fen': board.fen(),
-                'pgn': board.epd(), # EPD includes FEN plus move counts etc.
+                # 'pgn': board.epd(), # EPD can be complex, FEN is usually enough for state
                 'status_text': status_text,
-                'game_over': game_over # Let frontend know if game is over
+                'game_over': game_over,
+                'llm_thoughts': llm_thoughts_for_frontend # ADDED thoughts to response
             })
         else:
             # User move was illegal
             print(f"Error: Illegal user move - {move_uci}")
-            # Return error and current FEN so the frontend can resync
-            return jsonify({'error': f'Illegal move: {move_uci}', 'fen': board.fen()}), 400 # Send 400 Bad Request
+            return jsonify({'error': f'Illegal move: {move_uci}', 'fen': board.fen()}), 400
 
     except Exception as e:
-        # Catch potential errors during processing
         print(f"Error processing move: {e}\n{traceback.format_exc()}")
-        # Send a generic server error
         return jsonify({'error': 'An internal server error occurred'}), 500
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    # Use debug=False and a proper WSGI server (like gunicorn) in production
-    # For Cloud Run, gunicorn is typically used via the Procfile or CMD in Dockerfile
-    app.run(debug=True, port=5001, host='0.0.0.0') # host='0.0.0.0' makes it accessible on network if needed
+    # Use debug=False and a proper WSGI server in production
+    app.run(debug=True, port=5001, host='0.0.0.0')
