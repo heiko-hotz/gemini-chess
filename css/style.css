@@ -1,0 +1,13 @@
+body {
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 20px;
+}
+
+#myBoard {
+    margin-bottom: 10px;
+}
+
+/* Add more custom styles if needed */
