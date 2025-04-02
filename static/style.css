@@ -1,0 +1,58 @@
+body {
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    background-color: #f0f0f0;
+}
+
+h1 {
+    margin-bottom: 20px;
+}
+
+/* Set the width of the board */
+.board {
+    width: 400px; /* You can adjust this size */
+    margin-bottom: 20px;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+/* Ensure board is not affected by other flex settings */
+#myBoard {
+    box-sizing: content-box; /* Important for chessboard.js sizing */
+}
+
+.info {
+    text-align: center;
+    background-color: #fff;
+    padding: 15px;
+    border-radius: 5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.info p {
+    margin: 8px 0;
+    word-wrap: break-word; /* Wrap long FEN/PGN strings */
+}
+
+#fen, #pgn {
+    font-family: monospace;
+    font-size: 0.9em;
+    color: #555;
+    display: block; /* Make them take their own line */
+    max-width: 400px; /* Prevent excessive width on small screens */
+    margin-top: 4px;
+}
+
+#resetButton {
+    margin-top: 10px;
+    padding: 8px 15px;
+    font-size: 1em;
+    cursor: pointer;
+}
+
+/* Add simple hover effect for buttons */
+#resetButton:hover {
+    background-color: #ddd;
+}
