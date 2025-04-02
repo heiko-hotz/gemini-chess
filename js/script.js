@@ -37,6 +37,26 @@ function onDrop (source, target) {
   if (move === null) return 'snapback';
 
   updateStatus();
+
+  // If the game isn't over and it's Black's turn, make a random move for Black
+  if (!game.isGameOver() && game.turn() === 'b') {
+    // Add a small delay for visual effect
+    window.setTimeout(makeRandomMove, 250);
+  }
+}
+
+// --- Computer Move ---
+
+function makeRandomMove () {
+  var possibleMoves = game.moves();
+
+  // Game over
+  if (possibleMoves.length === 0) return;
+
+  var randomIdx = Math.floor(Math.random() * possibleMoves.length);
+  game.move(possibleMoves[randomIdx]);
+  board.position(game.fen()); // Update the board position
+  updateStatus(); // Update the status after Black's move
 }
 
 // Update the board position after the piece snap
